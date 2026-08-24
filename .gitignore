@@ -9,3 +9,4 @@ out/
 .DS_Store
 uploads/*
 !uploads/.gitkeep
+backend/test_resume.txt
