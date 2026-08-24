@@ -1,60 +1,101 @@
 # Smart Resume Screener
 
-Parses resumes, extracts structured candidate data, and scores each candidate against a job
-description using an LLM — with a ranked, modern dashboard to review results.
+An AI-powered resume screening application that parses resumes, extracts structured candidate information, and evaluates each candidate against a job description using Google Gemini. Results are ranked in a modern dashboard for quick candidate review.
 
-## Stack
+## Features
 
-| Layer     | Tech                                                    |
-|-----------|----------------------------------------------------------|
-| Backend   | Node.js, Express, MongoDB (Mongoose), Multer, pdf-parse |
-| LLM       | Google Gemini (`@google/generative-ai`)                 |
-| Frontend  | React (Vite), Tailwind CSS, lucide-react, axios          |
-| Storage   | MongoDB — one `Job` per role, many `Candidate`s per job  |
+- Create and manage job postings
+- Upload multiple resume PDFs for a selected role
+- Extract candidate skills, experience, and education using an LLM
+- Score candidate-job fit on a 1–10 scale
+- Generate an LLM-based justification for each match score
+- Rank candidates by match score
+- View structured candidate information in an expandable results dashboard
+- Handle individual resume-processing failures without interrupting the rest of the batch
 
-No frameworks or services outside this list are used, per the assignment's package/dependency
-guidance ("use only what is strictly required").
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Node.js, Express |
+| Database | MongoDB, Mongoose |
+| Resume Processing | Multer, pdf-parse |
+| LLM | Google Gemini (`@google/generative-ai`) |
+| Frontend | React, Vite |
+| Styling | Tailwind CSS |
+| Icons | lucide-react |
+| HTTP Client | Axios |
 
 ## Architecture
 
-```
+```text
 frontend (React SPA)
-  │  axios (multipart upload, REST)
-  ▼
+        │
+        │ Axios
+        │ REST API / multipart upload
+        ▼
 backend (Express API)
-  ├── routes/jobs.js         → CRUD for job postings
-  ├── routes/candidates.js   → upload resumes, orchestrate parsing + scoring, list ranked results
-  ├── services/resumeParser.js → pdf-parse: PDF buffer → plain text, name heuristic
-  ├── services/geminiService.js → two Gemini calls per resume (extraction, matching)
-  └── models/ (Job, Candidate) → Mongoose schemas
-  │
-  ▼
-MongoDB (Job, Candidate collections)
+        │
+        ├── routes/jobs.js
+        │      └── Job CRUD operations
+        │
+        ├── routes/candidates.js
+        │      └── Resume upload, processing & ranking
+        │
+        ├── services/resumeParser.js
+        │      └── PDF → plain text
+        │
+        ├── services/geminiService.js
+        │      └── Resume extraction & candidate matching
+        │
+        └── models/
+               ├── Job.js
+               └── Candidate.js
+        │
+        ▼
+MongoDB
+   ├── Jobs
+   └── Candidates
 ```
 
-### Request flow (upload → score)
+### Data Model
 
-1. User picks/creates a **Job** (title + full description) in the UI.
-2. User drops one or more resume **PDFs**.
-3. Frontend sends them as `multipart/form-data` to `POST /api/jobs/:jobId/candidates`.
-4. For each file, the backend:
-   - Extracts raw text with `pdf-parse`.
-   - Calls Gemini once to **extract** structured skills / experience / education (JSON).
-   - Calls Gemini a second time to **score fit 1–10 with justification** (JSON), using the
-     exact prompt style specified in the assignment brief.
-   - Saves a `Candidate` document (or a `failed` record with the error, so one bad PDF never
-     blocks the rest of the batch — `Promise.allSettled` is used across the batch).
-5. `GET /api/jobs/:jobId/candidates` returns candidates sorted by `matchScore` descending.
-6. The Results dashboard renders them as a ranked list with a radial fit-score gauge, extracted
-   skill tags, and an expandable panel with the LLM's justification, experience, and education.
+A single `Job` represents a role, while multiple `Candidate` documents are associated with that job.
 
-## LLM prompts used
-
-Both live in `backend/services/geminiService.js`.
-
-**1. Structured extraction** — pulls skills / experience / education out of resume text:
-
+```text
+Job
+ └── Candidates
+      ├── Candidate 1
+      ├── Candidate 2
+      ├── Candidate 3
+      └── ...
 ```
+
+## Request Flow
+
+### Resume Upload → Candidate Ranking
+
+1. The user creates or selects a **Job** containing a title and full job description.
+2. The user uploads one or more resume PDFs.
+3. The frontend sends the files as `multipart/form-data` to `POST /api/jobs/:jobId/candidates`.
+4. For each resume, the backend:
+   - Extracts text from the PDF using `pdf-parse`.
+   - Uses Gemini to extract structured skills, experience, and education.
+   - Uses Gemini again to evaluate the candidate's fit against the job description.
+   - Stores the candidate and scoring results in MongoDB.
+5. Candidate processing is performed independently using `Promise.allSettled`, so a failed resume does not prevent other resumes in the batch from being processed.
+6. The results endpoint returns candidates ranked by match score.
+7. The frontend displays the ranked candidates with their fit score, skills, experience, education, and LLM-generated justification.
+
+## LLM Processing
+
+The application uses two Gemini calls for each resume.
+
+### 1. Structured Resume Extraction
+
+The first call converts unstructured resume text into structured candidate data.
+
+```text
 You are a resume parsing engine.
 Extract structured data from the resume text below.
 
@@ -73,10 +114,11 @@ Resume:
 """
 ```
 
-**2. Match scoring** — mirrors the assignment's example prompt verbatim, with a JSON-only
-response constraint added so the score/justification can be parsed and stored:
+### 2. Candidate Matching
 
-```
+The second call evaluates the candidate against the selected job description and returns a numerical fit score with an explanation.
+
+```text
 Compare the following resume with this job description and rate fit on 1-10 with justification.
 
 Return ONLY valid JSON in exactly this shape, with no markdown formatting and no text outside the JSON object:
@@ -96,60 +138,214 @@ Job Description:
 """
 ```
 
+## Project Structure
+
+```text
+smart-resume-screener/
+│
+├── backend/
+│   ├── middleware/
+│   │   └── upload.js
+│   │
+│   ├── models/
+│   │   ├── Candidate.js
+│   │   └── Job.js
+│   │
+│   ├── routes/
+│   │   ├── candidates.js
+│   │   └── jobs.js
+│   │
+│   ├── services/
+│   │   ├── geminiService.js
+│   │   └── resumeParser.js
+│   │
+│   ├── .env.example
+│   ├── package.json
+│   └── server.js
+│
+├── frontend/
+│   ├── src/
+│   ├── .env.example
+│   └── package.json
+│
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
 ## Setup
 
-### 1. Backend
+### Prerequisites
+
+- Node.js
+- MongoDB
+- Google Gemini API key
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd smart-resume-screener
+```
+
+### 2. Configure the Backend
 
 ```bash
 cd backend
-cp .env.example .env     # fill in MONGODB_URI and GEMINI_API_KEY
+cp .env.example .env
 npm install
-npm start                 # or: npm run dev
 ```
 
-Get a Gemini API key at https://aistudio.google.com/apikey. Default model is
-`gemini-2.0-flash` (override with `GEMINI_MODEL` in `.env`).
+Add the required environment variables to `.env`:
 
-MongoDB: either run one locally (`mongodb://127.0.0.1:27017/smart_resume_screener` is the
-default) or point `MONGODB_URI` at a MongoDB Atlas cluster.
+```env
+MONGODB_URI=mongodb://127.0.0.1:27017/smart_resume_screener
+GEMINI_API_KEY=your_gemini_api_key
+```
 
-### 2. Frontend
+Optionally, configure the Gemini model:
+
+```env
+GEMINI_MODEL=gemini-2.0-flash
+```
+
+Start the backend:
+
+```bash
+npm start
+```
+
+For development:
+
+```bash
+npm run dev
+```
+
+### 3. Configure the Frontend
 
 ```bash
 cd frontend
-cp .env.example .env      # only needed if the backend isn't on localhost:5000
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-Open the printed local URL. Create a role, drop in a few resume PDFs, and hit **Screen** —
-results land on the **Results** tab, ranked by fit score.
+If the backend is running on the default `localhost:5000`, no additional configuration is required.
 
-## API reference
+Open the local frontend URL displayed by Vite.
 
-| Method | Route                                  | Purpose                                   |
-|--------|-----------------------------------------|--------------------------------------------|
-| POST   | `/api/jobs`                            | Create a job `{ title, description }`     |
-| GET    | `/api/jobs`                            | List jobs                                 |
-| GET    | `/api/jobs/:id`                        | Get one job                               |
-| DELETE | `/api/jobs/:id`                        | Delete a job + its candidates             |
-| POST   | `/api/jobs/:jobId/candidates`          | Upload resumes (`multipart`, field `resumes`, up to 20 PDFs, 10MB each) |
-| GET    | `/api/jobs/:jobId/candidates`          | List candidates, ranked by `matchScore` desc |
-| DELETE | `/api/jobs/:jobId/candidates/:id`      | Remove a candidate                        |
+### 4. MongoDB
 
-## Notes on evaluation focus
+The application supports either:
 
-- **Code quality & structure** — routes / models / services are separated; PDF parsing and
-  LLM calls are isolated in `services/`, so either can be swapped without touching route logic.
-- **Data extraction** — handled by a dedicated Gemini extraction prompt, stored as structured
-  sub-documents on `Candidate.extracted`.
-- **LLM prompt quality** — the matching prompt reuses the assignment's own example prompt
-  verbatim, with a minimal JSON-output constraint layered on for parseability.
-- **Output clarity** — the Results dashboard ranks candidates, shows the score as a gauge,
-  and surfaces the justification directly instead of raw LLM output.
+- A local MongoDB instance using the default connection:
+  `mongodb://127.0.0.1:27017/smart_resume_screener`
+- A MongoDB Atlas connection configured through `MONGODB_URI`
 
-## Demo video
+### 5. Gemini API Key
 
-Not included in this package — record a 2–3 min walkthrough (create a role → upload a couple
-of resumes → show the ranked results + an expanded justification) before submitting, per the
-assignment's deliverables list.
+A Gemini API key can be obtained from Google AI Studio.
+
+The application uses `gemini-2.0-flash` by default. The model can be overridden through the `GEMINI_MODEL` environment variable.
+
+## API Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/jobs` | Create a new job |
+| `GET` | `/api/jobs` | List all jobs |
+| `GET` | `/api/jobs/:id` | Retrieve a job |
+| `DELETE` | `/api/jobs/:id` | Delete a job and its candidates |
+| `POST` | `/api/jobs/:jobId/candidates` | Upload and screen resumes |
+| `GET` | `/api/jobs/:jobId/candidates` | Retrieve ranked candidates |
+| `DELETE` | `/api/jobs/:jobId/candidates/:id` | Remove a candidate |
+
+### Create Job
+
+```http
+POST /api/jobs
+Content-Type: application/json
+```
+
+```json
+{
+  "title": "Software Engineer",
+  "description": "Full job description..."
+}
+```
+
+### Upload Resumes
+
+```http
+POST /api/jobs/:jobId/candidates
+Content-Type: multipart/form-data
+```
+
+Upload resumes using the `resumes` field.
+
+- Maximum files per request: **20**
+- Maximum file size: **10 MB**
+- Supported format: **PDF**
+
+## Results Dashboard
+
+The Results dashboard provides a ranked view of screened candidates.
+
+Each candidate displays:
+
+- Overall fit score
+- Extracted skills
+- Experience
+- Education
+- LLM-generated match justification
+
+Candidates are automatically sorted by match score in descending order, allowing recruiters to quickly identify the strongest matches.
+
+## Error Handling
+
+Resume processing is isolated per candidate. If an individual PDF fails during parsing, extraction, or scoring, the candidate is recorded as failed while the remaining resumes continue processing.
+
+This prevents a single malformed or unsupported resume from interrupting an entire screening batch.
+
+## Demo Video
+
+The demo provides a short end-to-end walkthrough of the application: 
+https://drive.google.com/file/d/1JW6nKeZUt_dfEqgjzZ7IlaYGO90OzyN8/view?usp=sharing
+
+1. Create a job posting.
+2. Upload multiple resume PDFs.
+3. Run the screening process.
+4. View the ranked candidate results.
+5. Expand a candidate to review the extracted information and LLM-generated justification.
+
+The walkthrough demonstrates the complete workflow from job creation and resume upload to candidate ranking and review.
+
+## Evaluation Focus
+
+### Code Quality & Architecture
+
+Routes, models, middleware, and services are separated by responsibility. PDF parsing and LLM processing are isolated into dedicated services, making the application easier to maintain and extend.
+
+### Data Extraction
+
+Resume information is converted into structured candidate data containing skills, experience, and education.
+
+### LLM Matching
+
+Candidate-job compatibility is evaluated using a dedicated matching prompt that produces both a numerical fit score and a textual justification.
+
+### Output & Usability
+
+The dashboard presents candidates in ranked order and surfaces the most relevant information without requiring users to inspect raw LLM output.
+
+## Environment & Security
+
+Environment-specific configuration is stored through `.env` files and is not committed to the repository.
+
+Use `.env.example` files as templates for required configuration.
+
+Do not commit API keys, database credentials, or other sensitive configuration.
+
+## License
+
+This project is licensed under the terms specified in the repository's `LICENSE` file.
